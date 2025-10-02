@@ -2,7 +2,7 @@
 
 This repository contains the code and data used in the analysis for the paper:
 
-Examining landscape-scale disease processes through the lens of community assembly theory  
+Community assembly reveals environmental controls over rodent competition drive deer mouse density and hantavirus infection.  
 Angela D. Luis and Dean E. Pearson
 Submitted to Ecology Letters, 2025.
 
@@ -29,7 +29,7 @@ If you use this code or data, please cite:
 Angela D. Luis. Disease via Community Assembly. Zenodo. [DOI]
 
 ### Associated Paper 
-Luis, A.D. and D.E. Pearson. 2025. Examining landscape-scale disease processes through the lens of community assembly theory. Ecology Letters, in Review. 
+Luis, A.D. and D.E. Pearson. 2025. Community assembly reveals environmental controls over rodent competition drive deer mouse density and hantavirus infection. Ecology Letters, in Review. 
 
 ---
 
