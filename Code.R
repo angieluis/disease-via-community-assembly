@@ -16,15 +16,17 @@ library(lmtest)
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # Import Data
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-webspeciesdata <- read.csv("WebSpeciesData.csv")
+webspeciesdata <- read.csv("WebSpeciesdata.csv")
 envdat <- read.csv("EnvironmentalData.csv", row.names = 1)
 trait.data <- read.csv("SpeciesTraitData.csv")
-tree <- read.tree("PhyloTree.txt")
 
 
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # Prepare Data
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+# calculate number of infected deer mice as density * prevalence
+webspeciesdata$pm.inf <- webspeciesdata$pm * webspeciesdata$prevalence 
 
 webspeciesdata <- webspeciesdata %>%
   mutate(site = str_split_i(web, "[.]", 1))
@@ -44,7 +46,7 @@ envdat.sd <- decostand(envdat, "standardize", MARGIN=2)
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 
-ggplot(webspeciesdata,aes(x=invSimpson, y=prevalence, group=in2018pub)) +
+dilution.prev.plot <- ggplot(webspeciesdata,aes(x=invSimpson, y=prevalence, group=in2018pub)) +
   geom_point(size = 2.5, aes(col=in2018pub, shape = in2018pub)) +
   coord_cartesian(ylim=c(0,0.31)) +
   geom_smooth(method="lm",aes(col=in2018pub)) +
@@ -53,10 +55,32 @@ ggplot(webspeciesdata,aes(x=invSimpson, y=prevalence, group=in2018pub)) +
   theme_classic(base_size = 18) +
   theme(legend.position = "none") +
   scale_color_manual(values = c("N" = "firebrick", "Y"="steelblue"))
+dilution.prev.plot
 
 dilmod <- lm(prevalence ~ invSimpson, data = webspeciesdata)
-summary(dilmod)
+summary(dilmod) 
+summary(lm(prevalence ~ invSimpson*in2018pub, data = webspeciesdata)) # interaction is significant
 
+
+
+# log density of infected mice + 1 as the risk metric
+dilution.loginf.plot <- ggplot(webspeciesdata,aes(x=invSimpson, y=log(pm.inf+1), group=in2018pub)) +
+  geom_point(size = 2.5, aes(col=in2018pub, shape = in2018pub)) +
+  coord_cartesian(ylim=c(0,max(log(webspeciesdata$pm.inf+1)))) +
+  geom_smooth(method="lm",aes(col=in2018pub)) +
+  xlab("Rodent diversity") +
+  ylab("Infected host density") +
+  theme_classic(base_size = 18) +
+  theme(legend.position = "none") +
+  scale_color_manual(values = c("N" = "firebrick", "Y"="steelblue"))
+dilution.loginf.plot
+
+dilmod2 <- lm(log(pm.inf+1) ~ invSimpson, data = webspeciesdata)
+summary(dilmod2) 
+summary(lm(log(pm.inf+1) ~ invSimpson*in2018pub, data = webspeciesdata)) # interaction is significant
+
+library(patchwork)
+dilution.prev.plot / dilution.loginf.plot
 
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # Beta diversity and Nestedness
@@ -93,7 +117,7 @@ results_df <- data.frame(
 
 results_df[, 2:4] <- round(results_df[, 2:4], digits = 2)
 results_df[, 5] <- round(results_df[, 5], digits = 3)
-
+# print(xtable(results_df), include.rownames = FALSE)
 
 
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -190,7 +214,7 @@ rda.pcplot
 grid.arrange(rda.plot, rda.plot2, rda.pcplot, nrow = 1)
 
 
-#### 3D plot # not in publication
+#### 3D plot
 
 library(rgl)
 knitr::knit_hooks$set(webgl = hook_webgl)
@@ -264,7 +288,7 @@ summary(lm(pm ~ PC1, data=sdat, weights = n_months))
   
 # Prepare Phylogenetic Data ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # get phylogenetic tree 
-# tree <- read.tree("PhyloTree.txt")
+tree <- read.tree("PhyloTree.txt")
 plot.phylo(tree,no.margin=TRUE,cex=0.9)
 
 # calculate distances
@@ -525,13 +549,15 @@ pca_abiotic <- prcomp(envdat.sd[,-6])
 
 # scale all data so mean of 0 and sd of 1
 data <- webspeciesdata %>%
-  select(tmin,tmax,prcp,swe,elevation,biomass,pm,sum.dietcomp, prevalence, invSimpson) %>%
+  select(tmin,tmax,prcp,swe,elevation,biomass,pm,sum.dietcomp, prevalence, pm.inf, invSimpson) %>%
   mutate(PC1 = scale(pca_abiotic$x[,1]), 
          PC2 = scale(pca_abiotic$x[,2]),
          PC3 = scale(pca_abiotic$x[,3]),
          PC4 = scale(pca_abiotic$x[,4]),
          pm = scale(log(pm +1)),
          prevalence = scale(prevalence),
+         l.pm.inf = scale(log(pm.inf+1)),
+         pm.inf = scale(pm.inf),
          sum.dietcomp = scale(sum.dietcomp),
          D = scale(invSimpson))
 data$abiotic <- with(data, PC1 + PC2 + PC3)
@@ -551,9 +577,23 @@ summary(pathfit, fit.measures = TRUE, rsquare = TRUE)
 semPaths(pathfit,'std', layout='tree2', nCharNodes = 9, sizeMan = 8, sizeLat = 10)
 
 
+### log(infected mouse density + 1) instead of prevalence
+sem.model.lihd <- '
+  # regressions
+  sum.dietcomp ~ abiotic + biomass
+  biomass ~ abiotic
+  pm ~ sum.dietcomp +  biomass
+  l.pm.inf ~ pm 
+  
+  '
+pathfit.lihd <- sem(sem.model.lihd, data=data)
+summary(pathfit.lihd, fit.measures = TRUE, rsquare = TRUE)
+semPaths(pathfit.lihd,'std', layout='tree2', nCharNodes = 9, sizeMan = 8, sizeLat = 10)
+# nearly identical to prevalence model
 
 
 ############# does abiotic also directly affect pm?
+
 sem.model2 <- '
   # regressions
   sum.dietcomp ~ abiotic + biomass
@@ -642,6 +682,9 @@ env.UPGMA.g <- cutree(env.de.UPGMA, k = k)
 # Reorder clusters
 env.deo <- reorder.hclust(env.de.UPGMA,env.de)
 
+# reordered dendrogram by group color
+#hcoplot(env.de.UPGMA, env.de, lab = rownames(envdat.sd), k = k)
+
 # Convert the "hclust" object into a "dendrogram" object
 dend <- as.dendrogram(env.deo)
 
@@ -666,6 +709,25 @@ rownames(rods) <- rownames(envdat.sd)
 
 heatmap(
   t(cbind( decostand(rods,"standardize", MARGIN=2), envdat.sd)),
+  cexRow=2,cexCol=1.5,
+  Rowv = NA,
+  Colv = dend,
+  col = gray.colors(10,start=1,end=0.1),
+  scale = "none",
+  margin = c(12, 8),
+  #ylab = "Standardized Environmental Variables",
+  xlab = "Sites",
+  ColSideColors = cols[env.UPGMA.g],
+  RowSideColors = c(rep("darkred",dim(rods)[2]),rep("white",dim(envdat.sd)[2]))
+)
+
+# Now with infected host density instead of prevalence
+rods2 <- data.frame(pm, D = webspeciesdata$invSimpson,
+                   IHD = webspeciesdata$pm.inf)
+rownames(rods2) <- rownames(envdat.sd)
+
+heatmap(
+  t(cbind( decostand(rods2,"standardize", MARGIN=2), envdat.sd)),
   cexRow=2,cexCol=1.5,
   Rowv = NA,
   Colv = dend,
@@ -743,3 +805,38 @@ clustmod2 <- lm(prevalence~log(pm+1)*cluster124 -1, data=webspeciesdata)
 clustmod3 <- lm(log(pm+1)~invSimpson*cluster124 -1, data=webspeciesdata)
 clustmod4 <- lm(sum.dietcomp~invSimpson*cluster124 -1, data=webspeciesdata)
 
+
+#### with infected host density as the disease metric
+grid.arrange(
+  ggplot(webspeciesdata, aes(invSimpson, log(pm.inf+1))) + 
+    labs(x="Rodent Diversity", y="Infected host density") + 
+    coord_cartesian(ylim=c(0,3)) +
+    geom_point(size = 2.5, aes(col=cluster)) +
+    geom_smooth(method='lm', color="darkgray", aes(linetype=cluster124)) +
+    theme_classic(base_size = 18)
+  ,
+  ggplot(webspeciesdata, aes(log(pm+1), log(pm.inf+1))) + 
+    labs(x="Deer mouse density", y="Infected host density") + 
+    coord_cartesian(ylim=c(0,3)) +
+    geom_point(size = 2.5, aes(col=cluster)) +
+    geom_smooth(method='lm', color="darkgray", aes(linetype=cluster124)) +
+    theme_classic(base_size = 18)
+  ,
+  ggplot(webspeciesdata, aes(invSimpson, log(pm+1))) + 
+    labs(x="Rodent Diversity", y="Deer mouse density") + 
+    coord_cartesian(ylim=c(0,4.5)) +
+    geom_point(size = 2.5, aes(col=cluster)) +
+    geom_smooth(method='lm', color="darkgray", aes(linetype=cluster124)) +
+    theme_classic(base_size = 18)
+  ,
+  ggplot(webspeciesdata, aes(invSimpson, sum.dietcomp)) + 
+    labs(x="Rodent Diversity", y="Diet Competition") + 
+    #coord_cartesian(ylim=c(0,0.31)) +
+    geom_point(size = 2.5, aes(col=cluster)) +
+    geom_smooth(method='lm', color="darkgray",aes(linetype=cluster124)) +
+    theme_classic(base_size = 18)
+  , nrow=2)
+
+# Statistics
+clustmod1a <- lm(log(pm.inf+1)~invSimpson*cluster124, data=webspeciesdata) # xtable(tidy(clustmod1))
+clustmod2a <- lm(log(pm.inf+1)~log(pm+1)*cluster124, data=webspeciesdata)
